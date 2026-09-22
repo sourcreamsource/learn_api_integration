@@ -1,0 +1,375 @@
+# 🟩 AI GitGen  
+
+Git 변경 사항을 읽고 AI API(Application Programming Interface)로 커밋 메시지와 PR(Pull Request) 초안을 만드는 Python CLI(Command Line Interface) 도구다.  
+
+이 도구는 실제 커밋, push, GitHub PR 생성을 수행하지 않는다. 사람이 검토할 텍스트 초안만 터미널에 출력한다.  
+
+<br>
+
+## 🟢 핵심 기능  
+
+- `git status`로 변경 파일을 확인한다.  
+- `git diff`로 추적 파일과 새 파일의 변경 내용을 모은다.  
+- `commit` 명령으로 72자 이하 커밋 제목과 본문 초안을 생성한다.  
+- `pr` 명령으로 80자 이하 제목과 `Why`, `What`, `How to Test` 본문을 생성한다.  
+- OpenAI 호환 Chat Completions 형식과 Anthropic Messages 형식을 지원한다.  
+- API 파라미터 `model`, `temperature`, `max_tokens`를 실행 옵션으로 바꿀 수 있다.  
+- 안전 모드가 기본으로 켜지며 최대 10개 파일, 200줄만 전송한다.  
+- `.env`, `_temporary/models.json`, 인증서, 개인 키 파일은 항상 전송에서 제외한다.  
+- API는 한 번 실행할 때 정확히 1회만 호출한다.  
+
+<br><br>
+
+## 🟢 요구 환경  
+
+| 항목 | 조건 |  
+| --- | --- |
+| 운영체제 | macOS, Linux 또는 Windows |  
+| Python | 3.10 이상 |  
+| Git | 설치 필요 |  
+| 실행 위치 | Git 저장소 최상위 폴더 |  
+
+외부 Python 패키지는 필요 없다. Python 표준 라이브러리만 사용한다.  
+
+<br><br>
+
+## 🟢 설치  
+
+### 🟡 방법 1: 설치 없이 실행  
+
+프로젝트 루트에서 바로 실행한다.  
+
+```bash
+python3 main.py --help  
+```
+
+- `python3`: Python 3 인터프리터를 실행하는 명령  
+- `main.py`: CLI 시작 파일  
+- `--help`: 사용 가능한 명령과 옵션을 출력하는 선택 사항  
+
+### 🟡 방법 2: 가상환경에 명령 설치  
+
+```bash
+python3 -m venv .venv  
+source .venv/bin/activate  
+python3 -m pip install -e .  
+ai-gitgen --help  
+```
+
+- `venv`: Virtual Environment의 약자이며 프로젝트 전용 Python 환경을 만든다.  
+- `source`: 현재 셸에서 설정 파일을 읽어 가상환경을 활성화한다.  
+- `pip`: Pip Installs Packages의 재귀 약자이며 Python 패키지를 설치한다.  
+- `-e`: Editable의 약자이며 소스 수정이 설치 결과에 바로 반영되게 한다.  
+
+<br><br>
+
+## 🟢 환경변수 설정  
+
+API Key는 코드나 명령 인자에 적지 않고 환경변수로만 전달한다.  
+
+```bash
+export AI_API_KEY="YOUR_API_KEY"  
+export AI_API_FORMAT="openai"  
+export AI_MODEL="YOUR_MODEL_ID"  
+```
+
+- `export`: 현재 터미널과 그 터미널이 실행하는 프로그램에 환경변수를 전달한다.  
+- `AI_API_KEY`: AI API 인증에 쓰는 비밀값이다.  
+- `AI_API_FORMAT`: `openai` 또는 `anthropic` 중 요청 형식을 선택한다.  
+- `AI_MODEL`: 사용할 모델의 ID(Identifier)를 지정한다.  
+
+OpenAI 호환 API가 아닌 별도 호환 서버를 쓸 때만 전체 엔드포인트를 추가한다.  
+
+```bash
+export AI_API_URL="https://example.com/v1/chat/completions"  
+```
+
+Anthropic Messages 형식은 다음처럼 선택한다. 실제 Key, 모델 ID, 서비스 URL은 사용하는 서비스의 값을 넣는다.  
+
+```bash
+export AI_API_KEY="YOUR_API_KEY"  
+export AI_API_FORMAT="anthropic"  
+export AI_MODEL="YOUR_MODEL_ID"  
+export AI_API_URL="https://example.com/v1/messages"  
+```
+
+중요 사항:  
+
+- 실제 Key를 `.env.example`, README, 소스 코드, Git 커밋에 적지 않는다.  
+- `.env`를 직접 사용하는 기능은 없다. 필요한 값은 `export`로 설정한다.  
+- 셸 기록에 Key가 남는 것이 걱정되면 `read -s AI_API_KEY && export AI_API_KEY`를 사용한다.  
+- `_temporary/models.json`은 프로그램이 읽지 않으며 Git과 AI 전송 대상에서 제외된다.  
+
+<br><br>
+
+## 🟢 사용 방법  
+
+### 🟡 커밋 메시지 생성  
+
+```bash
+python3 main.py commit  
+```
+
+옵션을 바꾼 실행 예시다.  
+
+```bash
+python3 main.py commit -model "YOUR_MODEL_ID" -temperature 0.1 -max-tokens 400  
+```
+
+### 🟡 PR 제목과 본문 생성  
+
+```bash
+python3 main.py pr  
+```
+
+Anthropic Messages 형식 예시다.  
+
+```bash
+python3 main.py pr -api-format anthropic -model "YOUR_MODEL_ID" -temperature 0.2 -max-tokens 700  
+```
+
+### 🟡 옵션 설명  
+
+| 옵션 | 기본값 | 의미 |  
+| --- | --- | --- |
+| `-model`, `--model` | `AI_MODEL` 또는 기본 모델 | 사용할 모델 ID |  
+| `-temperature`, `--temperature` | `0.2` | 낮을수록 일정하고 보수적이며 Anthropic 형식은 최대 1.0 |  
+| `-max-tokens`, `--max-tokens` | `700` | AI가 생성할 수 있는 최대 토큰 수 |  
+| `-api-format`, `--api-format` | `AI_API_FORMAT` 또는 `openai` | 요청·응답 JSON 구조 |  
+| `-api-url`, `--api-url` | 형식별 공식 URL | 전체 API 엔드포인트 |  
+| `-timeout`, `--timeout` | `30` | 최대 네트워크 대기 시간(초) |  
+| `-safe-mode`, `--safe-mode` | 켜짐 | 마스킹과 최대 10개 파일·200줄 제한 |  
+| `-no-safe-mode`, `--no-safe-mode` | 꺼짐 | 마스킹과 양 제한만 해제 |  
+
+`--no-safe-mode`를 사용해도 보호 파일은 전송되지 않는다.  
+
+<br><br>
+
+## 🟢 출력 예시  
+
+### 🟡 커밋 메시지  
+
+```text
+[INFO] Git status 수집 완료: 3개 파일 변경 감지  
+[INFO] Git diff 수집 완료: 120줄  
+[INFO] 안전 모드: ON  
+[INFO] AI API 요청 중... (이번 실행 1회)  
+[DONE] 커밋 메시지 생성 완료  
+
+=== Commit Message ===  
+feat(cli): Git 변경 기반 메시지 생성 추가  
+
+- Git 상태와 diff를 AI 프롬프트에 연결  
+- API 오류와 출력 형식 검증 추가  
+=== End Commit Message ===  
+```
+
+### 🟡 PR 초안  
+
+```text
+=== PR Title ===  
+feat: AI 기반 Git 초안 생성 기능 추가  
+
+=== PR Body ===  
+## Why  
+- 반복되는 커밋과 PR 설명 작성을 줄이기 위해 필요했습니다.  
+
+## What  
+- Git 변경 수집과 AI API 호출을 연결했습니다.  
+
+## How to Test  
+- python3 -m unittest discover -s tests -v 명령을 실행합니다.  
+=== End PR Draft ===  
+```
+
+AI가 만든 내용은 코드와 일치하지 않을 수 있다. 복사하기 전에 파일명, 변경 이유, 테스트 결과, 민감정보 포함 여부를 직접 확인한다.  
+
+<br><br>
+
+## 🟢 프로그램 구조  
+
+| 경로 | 역할 | 분리한 이유 |  
+| --- | --- | --- |
+| `main.py` | 프로그램 시작 | 실행 진입점을 작게 유지 |  
+| `ai_gitgen/cli.py` | 명령과 전체 흐름 연결 | 사용자 입력과 업무 순서를 한곳에서 관리 |  
+| `ai_gitgen/git_service.py` | Git 상태와 diff 수집 | Git 실패와 API 실패를 따로 검사 |  
+| `ai_gitgen/security.py` | 보호 파일 제외, 마스킹, 줄 제한 | 보안 정책을 독립적으로 테스트 |  
+| `ai_gitgen/prompt_builder.py` | commit·PR 프롬프트 작성 | 프롬프트 실험이 통신 코드에 영향을 주지 않게 함 |  
+| `ai_gitgen/ai_client.py` | REST API 요청과 응답 처리 | 제공자별 JSON 차이를 한곳에서 처리 |  
+| `ai_gitgen/formatter.py` | 제목 길이와 PR 구조 보완 | AI의 형식 실수를 로컬에서 확정적으로 고침 |  
+| `tests/` | 자동 테스트 | 실제 과금 요청 없이 실패 조건을 재현 |  
+| `_practice/` | 단계별 실습 교재 | 처음부터 따라 하며 원리를 설명할 수 있게 함 |  
+
+전체 흐름은 다음과 같다.  
+
+```text
+CLI 옵션 해석  
+    ↓  
+Git status와 diff 수집  
+    ↓  
+보호 파일 제외·민감정보 마스킹·전송량 제한  
+    ↓  
+commit 또는 PR 프롬프트 작성  
+    ↓  
+AI REST API 1회 호출  
+    ↓  
+제목 길이와 본문 구조 후처리·재검증  
+    ↓  
+복사 가능한 터미널 출력  
+```
+
+<br><br>
+
+## 🟢 오류 처리  
+
+| 상황 | 동작 |  
+| --- | --- |
+| Git 저장소가 아님 | 프로젝트 루트에서 실행하라는 오류와 종료 번호 `2` |  
+| Git 하위 폴더에서 실행 | 저장소 루트로 이동하라는 오류 |  
+| 변경 사항 없음 | API를 호출하지 않고 정상 종료 번호 `0` |  
+| API Key 없음 | `AI_API_KEY` 설정 방법 출력 |  
+| 보호 파일만 변경 | 외부 전송 없이 중단 |  
+| HTTP 인증·서버 오류 | 상태 코드와 안전하게 정리한 원인 출력 |  
+| 네트워크 시간 초과 | 네트워크 오류 원인 출력 |  
+| 잘못된 JSON 응답 | 응답 형식 오류 출력 |  
+| PR 섹션 누락 | 로컬 후처리로 세 섹션과 불릿을 보완한 뒤 재검증 |  
+
+<br><br>
+
+## 🟢 테스트  
+
+```bash
+python3 -m unittest discover -s tests -v  
+```
+
+- `-m`: 파일 경로 대신 Python 모듈을 실행한다.  
+- `unittest`: Python 기본 Unit Test 모듈이다.  
+- `discover`: 정해진 이름의 테스트 파일을 자동으로 찾는다.  
+- `-s tests`: Start Directory, 즉 검색 시작 폴더를 `tests`로 지정한다.  
+- `-v`: Verbose의 약자이며 각 테스트 이름과 결과를 자세히 보여 준다.  
+
+테스트는 가짜 API 응답만 사용한다. 실제 API Key, 네트워크, 비용이 필요 없다.  
+
+<br><br>
+
+## 🟢 보안과 비용 주의사항  
+
+- 기본 안전 모드는 최대 10개 파일, 200줄만 AI에 보낸다.  
+- API Key, Bearer 토큰, 비밀번호, 이메일, 개인 키 모양을 마스킹한다.  
+- 정규표현식 마스킹이 모든 민감정보를 100% 찾는 것은 아니다.  
+- 파일 이름 자체가 민감하면 AI 실행 전에 Git 변경 목록을 직접 확인한다.  
+- 요청 로그나 오류 화면을 공유할 때도 Key가 없는지 다시 확인한다.  
+- `temperature`와 `max_tokens`를 필요 이상으로 높이지 않는다.  
+- `commit`과 `pr`은 각각 실행할 때마다 API를 1회 호출하므로 반복 실행만큼 비용이 늘어난다.  
+
+<br><br>
+
+## 🟢 Docker 및 Docker Compose 실행 가이드  
+
+프로젝트는 격리된 Linux 컨테이너 환경에서 프로그램을 실행할 수 있도록 `Dockerfile`과 `compose.yaml`을 제공한다.  
+
+### 🟡 컨테이너 환경 정보  
+
+| 항목 | 설정값 | 설명 |  
+| :--- | :--- | :--- |
+| 기반 운영체제 (OS) | Debian 12 (Bookworm) | Ubuntu가 아닌 Debian 기반의 경량 공식 이미지(`python:3.12-slim`) 사용 |  
+| Python 버전 | Python 3.12 | 가상환경 없이 컨테이너 기본 Python 사용 |  
+| 추가 설치 도구 | Git | `git status`, `git diff` 수집을 위해 패키지 관리자(`apt-get`)로 설치 |  
+| 작업 디렉토리 | `/workspace` | 호스트(내 컴퓨터)의 Git 저장소가 읽기 전용(`:ro`)으로 연결되는 위치 |  
+| 보안 원칙 | API Key 이미지 제외 | 이미지를 만들 때 API Key가 포함되지 않으며, 실행 시 환경변수로만 전달 |  
+
+<br><br>
+
+### 🟡 Docker 단독 실행 방법  
+
+#### ⚫️ 1. Docker 이미지 빌드 (Image Build)  
+현재 폴더의 `Dockerfile`을 읽어 실행용 이미지를 만든다.  
+
+```bash
+docker build -t ai-gitgen:local .  
+```
+
+- `docker`: Docker 컨테이너 제어 도구  
+- `build`: Dockerfile을 읽어 이미지를 생성하는 하위 명령  
+- `-t` (Tag): 생성할 이미지의 이름(`ai-gitgen`)과 태그(`local`) 지정  
+- `.`: 현재 폴더를 빌드 컨텍스트(작업 파일 위치)로 전달  
+
+#### ⚫️ 2. Docker 컨테이너 실행 (Container Run)  
+호스트의 Git 저장소를 읽기 전용으로 연결하고, 환경변수를 주입하여 실행한다.  
+
+```bash
+# 커밋 메시지 생성 실행  
+docker run --rm -v "$PWD:/workspace:ro" -e AI_API_KEY -e AI_API_FORMAT -e AI_MODEL -e AI_API_URL ai-gitgen:local commit  
+
+# PR 초안 생성 실행  
+docker run --rm -v "$PWD:/workspace:ro" -e AI_API_KEY -e AI_API_FORMAT -e AI_MODEL -e AI_API_URL ai-gitgen:local pr  
+```
+
+- `run`: 이미지를 바탕으로 새 컨테이너를 실행  
+- `--rm` (Remove): 실행이 끝나면 일회용 컨테이너를 자동 삭제  
+- `-v` (Volume): 호스트 폴더(`$PWD`)를 컨테이너 내부(`/workspace`)에 연결  
+- `:ro` (Read-Only): 컨테이너가 원본 소스 코드를 임의로 수정하거나 삭제하지 못하도록 읽기 전용으로 잠금  
+- `-e` (Environment): 호스트 터미널에 설정된 환경변수를 컨테이너 안으로 안전하게 전달  
+
+<br><br>
+
+### 🟡 Docker Compose 실행 방법  
+
+`compose.yaml` 설정을 사용하면 긴 `docker run` 옵션을 매번 입력하지 않고 간결하게 실행할 수 있다.  
+
+#### ⚫️ 1. Compose 빌드  
+```bash
+docker compose build  
+```
+
+- `compose`: 여러 컨테이너 옵션을 파일로 관리하는 Docker 공식 플러그인  
+- `build`: `compose.yaml`에 정의된 `Dockerfile`로 서비스 이미지 빌드  
+
+#### ⚫️ 2. Compose 명령 실행  
+호스트 터미널에 `AI_API_KEY` 환경변수가 설정되어 있어야 한다.  
+
+```bash
+# 커밋 메시지 생성 실행  
+docker compose run --rm ai-gitgen commit  
+
+# PR 초안 생성 실행  
+docker compose run --rm ai-gitgen pr  
+```
+
+- `compose run`: `compose.yaml`에 등록된 `ai-gitgen` 서비스를 1회성 컨테이너로 실행  
+- `commit` / `pr`: 컨테이너 내부 프로그램(`main.py`)에 전달할 작업 명령  
+
+<br><br>
+
+### 🟡 컨테이너 내부 Bash 셸 접속 방법  
+
+컨테이너 내부 파일 구조나 환경(Debian OS, Python 버전 등)을 직접 확인하고 싶을 때 `bash`로 대화형 접속을 할 수 있다.  
+
+`Dockerfile`에 기본 실행 파일(`ENTRYPOINT`)이 지정되어 있으므로 `--entrypoint bash` 옵션을 주어 진입점을 교체하고 `-it` 옵션으로 실행한다.  
+
+```bash
+# Docker 명령으로 Bash 접속  
+docker run --rm -it --entrypoint bash -v "$PWD:/workspace:ro" ai-gitgen:local  
+
+# Docker Compose 명령으로 Bash 접속  
+docker compose run --rm --entrypoint bash ai-gitgen  
+```
+
+- `-i` (Interactive): 키보드 표준 입력(stdin) 유지  
+- `-t` (Pseudo-TTY): 터미널 화면(프롬프트) 할당  
+- `--entrypoint bash`: 기본 실행 프로그램 대신 `bash` 셸 실행  
+- 접속 후 `cat /etc/os-release` 명령을 입력하면 Debian 기반임을 눈으로 직접 확인할 수 있으며, 종료 시에는 `exit`를 입력한다.  
+
+자세한 단계별 실습 과정은 `_practice/38_Docker로_마지막_실습.md` 문서를 참고한다.  
+
+<br><br>
+
+## 🟢 현재 범위 밖의 기능  
+
+- `git commit` 자동 실행  
+- `git push` 자동 실행  
+- GitHub 저장소 생성  
+- GitHub PR 자동 생성  
+- 실제 AI 응답의 사실 여부 자동 보증  
+
+GitHub 원격 반영은 사용자가 결과를 검토한 뒤 직접 수행한다.  
