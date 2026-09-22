@@ -1,0 +1,21 @@
+# Git 이력과 로컬 브랜치 정보를 이미지 빌드 문맥에서 제외한다.
+.git
+
+# 실제 API Key가 들어갈 수 있는 환경변수 파일을 제외한다.
+.env
+.env.*
+
+# 과제용 비밀 설정과 임시 파일을 이미지에서 제외한다.
+_temporary
+
+# Python 실행 캐시와 로컬 가상환경을 이미지에서 제외한다.
+__pycache__
+*.pyc
+.venv
+
+# 학습·기록 문서는 실행 이미지에 필요하지 않아 제외한다.
+_practice
+_learned
+_record
+docs
+tests
