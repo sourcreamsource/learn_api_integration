@@ -3,10 +3,12 @@
 import contextlib  # 표준 출력과 오류를 문자열로 모은다.
 import io  # 출력 캡처용 메모리 문자열 파일을 만든다.
 import os  # 테스트 환경변수를 임시로 설정한다.
+import tempfile  # 실제 비밀 파일 대신 임시 .env 파일을 만든다.
 import unittest  # Python 기본 테스트 도구를 가져온다.
+from pathlib import Path  # 임시 .env 파일 경로를 안전하게 다룬다.
 from unittest.mock import patch  # Git 수집과 API 호출을 가짜 함수로 바꾼다.
 
-from ai_gitgen.cli import main  # 실제 CLI 진입점을 가져온다.
+from ai_gitgen.cli import load_dotenv, main  # .env 로더와 실제 CLI 진입점을 가져온다.
 from ai_gitgen.models import GitContext  # 테스트용 Git 맥락을 만든다.
 
 
@@ -19,10 +21,11 @@ def empty_context() -> GitContext:  # 반복 사용할 변경 없음 맥락을 �
 
 
 class CliTest(unittest.TestCase):  # 전체 CLI 연결 동작 검사를 묶는다.
-    def capture(self, arguments: list[str]) -> tuple[int, str, str]:  # CLI 종료 번호와 두 출력을 함께 모은다.
+    def capture(self, arguments: list[str], load_environment: bool = False) -> tuple[int, str, str]:  # CLI 종료 번호와 두 출력을 함께 모은다.
         stdout = io.StringIO()  # 표준 출력을 받을 메모리 파일을 만든다.
         stderr = io.StringIO()  # 표준 오류를 받을 메모리 파일을 만든다.
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):  # 터미널 출력을 메모리 파일로 잠시 돌린다.
+        dotenv_context = contextlib.nullcontext() if load_environment else patch("ai_gitgen.cli.load_dotenv")  # 일반 테스트가 실제 .env를 읽지 않게 격리한다.
+        with dotenv_context, contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):  # .env와 터미널 출력을 테스트 범위 안에서만 제어한다.
             code = main(arguments)  # 전달된 CLI 인자로 프로그램을 실행한다.
         return code, stdout.getvalue(), stderr.getvalue()  # 종료 번호와 모은 출력을 돌려준다.
 
@@ -51,7 +54,7 @@ class CliTest(unittest.TestCase):  # 전체 CLI 연결 동작 검사를 묶는�
     def test_commit_calls_api_once(self, collect: object, generate: object) -> None:  # 커밋 생성의 호출 횟수와 출력을 검사한다.
         collect.return_value = changed_context()  # 변경 있음 상태를 만든다.
         generate.return_value = "feat: 자동 생성 추가\n\n- main.py 변경"  # 가짜 AI 커밋 응답을 준비한다.
-        with patch.dict(os.environ, {"AI_API_KEY": "fake-key"}, clear=True):  # 테스트용 가짜 키만 환경변수에 넣는다.
+        with patch.dict(os.environ, {"AI_API_KEY": "fake-key", "AI_API_URL": "https://example.test/v1/messages"}, clear=True):  # 테스트용 가짜 키와 URL만 환경변수에 넣는다.
             code, stdout, stderr = self.capture(["commit", "-temperature", "0.1", "-max-tokens", "400"])  # 옵션을 바꿔 명령을 실행한다.
         self.assertEqual(code, 0)  # 성공 종료여야 한다.
         self.assertEqual(stderr, "")  # 오류 출력은 없어야 한다.
@@ -67,7 +70,7 @@ class CliTest(unittest.TestCase):  # 전체 CLI 연결 동작 검사를 묶는�
     def test_pr_output_has_required_sections(self, collect: object, generate: object) -> None:  # PR 출력의 필수 구조를 검사한다.
         collect.return_value = changed_context()  # 변경 있음 상태를 만든다.
         generate.return_value = '{"title":"feat: PR 생성","body":"## Why\\n- 이유\\n\\n## What\\n- 변경\\n\\n## How to Test\\n- 확인"}'  # 가짜 AI PR JSON을 준비한다.
-        with patch.dict(os.environ, {"AI_API_KEY": "fake-key"}, clear=True):  # 테스트용 가짜 키만 환경변수에 넣는다.
+        with patch.dict(os.environ, {"AI_API_KEY": "fake-key", "AI_API_URL": "https://example.test/v1/messages"}, clear=True):  # 테스트용 가짜 키와 URL만 환경변수에 넣는다.
             code, stdout, stderr = self.capture(["pr"])  # pr 명령을 실행하고 출력을 모은다.
         self.assertEqual(code, 0)  # 성공 종료여야 한다.
         self.assertEqual(stderr, "")  # 오류 출력은 없어야 한다.
@@ -90,10 +93,54 @@ class CliTest(unittest.TestCase):  # 전체 CLI 연결 동작 검사를 묶는�
     def test_anthropic_temperature_range(self, collect: object) -> None:  # Anthropic temperature 상한을 검사한다.
         collect.return_value = changed_context()  # API 설정 검사까지 진행할 변경 있음 상태를 만든다.
         with patch.dict(os.environ, {"AI_API_KEY": "fake-key"}, clear=True):  # 테스트용 가짜 Key만 환경변수에 넣는다.
-            code, stdout, stderr = self.capture(["commit", "-api-format", "anthropic", "-temperature", "1.5"])  # 허용 범위를 넘는 값으로 실행한다.
+            code, stdout, stderr = self.capture(["commit", "-api-format", "anthropic", "-api-url", "https://example.test/v1/messages", "-temperature", "1.5"])  # 허용 범위를 넘는 값으로 실행한다.
         self.assertEqual(code, 2)  # 제공자 설정 오류 종료여야 한다.
         self.assertIn("1.0", stderr)  # Anthropic 상한을 사용자에게 알려야 한다.
         self.assertIn("Git status 수집 완료", stdout)  # API 요청 전 Git 수집까지만 진행돼야 한다.
+
+    @patch("ai_gitgen.cli.collect_git_context")  # 실제 Git 수집을 가짜 함수로 바꾼다.
+    def test_missing_api_url_fails_without_default(self, collect: object) -> None:  # URL 누락 시 기본 주소를 쓰지 않는지 검사한다.
+        collect.return_value = changed_context()  # API 설정 검사까지 진행할 변경 있음 상태를 만든다.
+        with patch.dict(os.environ, {"AI_API_KEY": "fake-key"}, clear=True):  # URL 없이 테스트용 가짜 키만 환경변수에 넣는다.
+            code, stdout, stderr = self.capture(["commit"])  # 별도 URL 옵션 없이 commit 명령을 실행한다.
+        self.assertEqual(code, 2)  # 필수 URL 누락은 설정 오류 종료 번호여야 한다.
+        self.assertIn("AI_API_URL", stderr)  # 누락된 환경변수 이름을 정확히 안내해야 한다.
+        self.assertNotIn("api.openai.com", stderr)  # 제거한 기본 OpenAI 주소가 오류에도 나타나지 않아야 한다.
+        self.assertIn("Git status 수집 완료", stdout)  # 외부 요청 전 Git 수집까지만 진행돼야 한다.
+
+    def test_load_dotenv_parses_file(self) -> None:  # .env 파일 파싱 기능을 검사한다.
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as temp:  # 임시 .env 파일을 만든다.
+            temp.write("# 주석 줄입니다\n")  # 주석 줄을 작성한다.
+            temp.write("TEST_ENV_VAR=hello_world\n")  # 일반 변수를 작성한다.
+            temp.write('QUOTED_VAR="quoted_value"\n')  # 따옴표로 감싸진 값을 작성한다.
+            temp.write("EMPTY_VAL=\n")  # 빈 값을 작성한다.
+            temp_path = temp.name  # 임시 파일의 경로를 저장한다.
+        try:  # 파일 정리 보장을 위해 try 블록을 시작한다.
+            with patch.dict(os.environ, {}, clear=True):  # 실제 컴퓨터의 환경변수와 테스트 값을 분리한다.
+                load_dotenv(temp_path, override=True)  # 임시 파일의 값을 현재 테스트 프로세스에 등록한다.
+                self.assertEqual(os.environ.get("TEST_ENV_VAR"), "hello_world")  # 일반 값이 올바르게 등록됐는지 검사한다.
+                self.assertEqual(os.environ.get("QUOTED_VAR"), "quoted_value")  # 따옴표를 제외한 값이 등록됐는지 검사한다.
+                self.assertEqual(os.environ.get("EMPTY_VAL"), "")  # 빈 값도 빈 문자열로 등록됐는지 검사한다.
+        finally:  # 성공/실패 여부와 관계없이 실행한다.
+            Path(temp_path).unlink(missing_ok=True)  # 임시 파일을 삭제한다.
+
+    @patch("ai_gitgen.cli.generate_text")  # 실제 외부 요청을 가짜 응답으로 바꾼다.
+    @patch("ai_gitgen.cli.collect_git_context")  # 실제 Git 수집을 가짜 함수로 바꾼다.
+    def test_main_loads_dotenv_before_building_parser(self, collect: object, generate: object) -> None:  # .env가 CLI 기본값보다 먼저 적용되는지 검사한다.
+        collect.return_value = changed_context()  # API 설정 생성까지 진행할 변경 있음 상태를 만든다.
+        generate.return_value = "feat: .env 자동 로드"  # 네트워크 없이 성공 흐름을 끝낼 가짜 결과를 준비한다.
+        with tempfile.TemporaryDirectory() as temp_directory:  # 테스트가 끝나면 자동 삭제되는 임시 폴더를 만든다.
+            dotenv_path = Path(temp_directory) / ".env"  # 임시 프로젝트 루트의 .env 경로를 만든다.
+            dotenv_path.write_text("AI_API_KEY=fake-key\nAI_API_FORMAT=anthropic\nAI_MODEL=fake-model\nAI_API_URL=https://example.test/v1/messages\n", encoding="utf-8")  # .env.example과 같은 네 가지 설정을 가짜 값으로 작성한다.
+            with patch("ai_gitgen.cli.Path.cwd", return_value=Path(temp_directory)), patch.dict(os.environ, {}, clear=True):  # 로더가 임시 .env만 읽도록 실행 위치와 환경을 격리한다.
+                code, stdout, stderr = self.capture(["commit"], load_environment=True)  # 실제 load_dotenv가 포함된 commit 흐름을 실행한다.
+        self.assertEqual(code, 0)  # .env 설정만으로 정상 종료해야 한다.
+        self.assertEqual(stderr, "")  # 설정 오류가 없어야 한다.
+        self.assertIn("커밋 메시지 생성 완료", stdout)  # 가짜 API 응답까지 처리됐는지 확인한다.
+        settings = generate.call_args.args[0]  # 가짜 API 함수가 받은 최종 설정을 꺼낸다.
+        self.assertEqual(settings.api_url, "https://example.test/v1/messages")  # .env의 URL이 그대로 사용됐는지 확인한다.
+        self.assertEqual(settings.api_format, "anthropic")  # .env의 요청 형식이 사용됐는지 확인한다.
+        self.assertEqual(settings.model, "fake-model")  # .env의 모델 ID가 사용됐는지 확인한다.
 
 
 if __name__ == "__main__":  # 이 테스트 파일을 직접 실행했는지 확인한다.

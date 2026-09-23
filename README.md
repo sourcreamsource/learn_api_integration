@@ -65,39 +65,32 @@ ai-gitgen --help
 
 ## 🟢 환경변수 설정  
 
-API Key는 코드나 명령 인자에 적지 않고 환경변수로만 전달한다.  
+예시 파일을 복사해 실제 설정 파일을 만든다.
 
 ```bash
-export AI_API_KEY="YOUR_API_KEY"  
-export AI_API_FORMAT="openai"  
-export AI_MODEL="YOUR_MODEL_ID"  
+cp .env.example .env
 ```
 
-- `export`: 현재 터미널과 그 터미널이 실행하는 프로그램에 환경변수를 전달한다.  
-- `AI_API_KEY`: AI API 인증에 쓰는 비밀값이다.  
-- `AI_API_FORMAT`: `openai` 또는 `anthropic` 중 요청 형식을 선택한다.  
-- `AI_MODEL`: 사용할 모델의 ID(Identifier)를 지정한다.  
+- `cp`: Copy의 약자이며 `.env.example`을 `.env`라는 새 파일로 복사한다.
+- `.env.example`: 필요한 변수 이름과 예시만 보여 주며 실행할 때 직접 읽는 파일이 아니다.
+- `.env`: 실제 Key, 모델, 요청 형식, 전체 요청 주소를 보관하며 Git에서 제외된다.
 
-OpenAI 호환 API가 아닌 별도 호환 서버를 쓸 때만 전체 엔드포인트를 추가한다.  
+`.env`에는 다음 네 값을 사용하는 서비스에 맞게 입력한다.
 
-```bash
-export AI_API_URL="https://example.com/v1/chat/completions"  
+```dotenv
+AI_API_KEY="YOUR_API_KEY"
+AI_API_FORMAT="anthropic"
+AI_MODEL="YOUR_MODEL_ID"
+AI_API_URL="https://example.com/v1/messages"
 ```
 
-Anthropic Messages 형식은 다음처럼 선택한다. 실제 Key, 모델 ID, 서비스 URL은 사용하는 서비스의 값을 넣는다.  
-
-```bash
-export AI_API_KEY="YOUR_API_KEY"  
-export AI_API_FORMAT="anthropic"  
-export AI_MODEL="YOUR_MODEL_ID"  
-export AI_API_URL="https://example.com/v1/messages"  
-```
+`AI_API_URL`은 반드시 `/v1/messages` 또는 `/v1/chat/completions` 같은 경로까지 포함한 전체 엔드포인트를 적는다. 코드에는 대신 사용할 기본 URL이 없다.
 
 중요 사항:  
 
 - 실제 Key를 `.env.example`, README, 소스 코드, Git 커밋에 적지 않는다.  
-- `.env`를 직접 사용하는 기능은 없다. 필요한 값은 `export`로 설정한다.  
-- 셸 기록에 Key가 남는 것이 걱정되면 `read -s AI_API_KEY && export AI_API_KEY`를 사용한다.  
+- 프로그램은 시작할 때 프로젝트 루트의 `.env`를 먼저 읽는다.
+- 이미 `export`로 설정된 환경변수는 `.env`보다 우선하며 자동으로 덮어쓰지 않는다.
 - `_temporary/models.json`은 프로그램이 읽지 않으며 Git과 AI 전송 대상에서 제외된다.  
 
 <br><br>
@@ -136,7 +129,7 @@ python3 main.py pr -api-format anthropic -model "YOUR_MODEL_ID" -temperature 0.2
 | `-temperature`, `--temperature` | `0.2` | 낮을수록 일정하고 보수적이며 Anthropic 형식은 최대 1.0 |  
 | `-max-tokens`, `--max-tokens` | `700` | AI가 생성할 수 있는 최대 토큰 수 |  
 | `-api-format`, `--api-format` | `AI_API_FORMAT` 또는 `openai` | 요청·응답 JSON 구조 |  
-| `-api-url`, `--api-url` | 형식별 공식 URL | 전체 API 엔드포인트 |  
+| `-api-url`, `--api-url` | `AI_API_URL` 필수 | 전체 API 엔드포인트 |
 | `-timeout`, `--timeout` | `30` | 최대 네트워크 대기 시간(초) |  
 | `-safe-mode`, `--safe-mode` | 켜짐 | 마스킹과 최대 10개 파일·200줄 제한 |  
 | `-no-safe-mode`, `--no-safe-mode` | 꺼짐 | 마스킹과 양 제한만 해제 |  

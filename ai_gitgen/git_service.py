@@ -83,31 +83,53 @@ def _diff_for_path(path: str, has_head: bool, is_untracked: bool) -> str:  # 파
     return "\n".join(part for part in (staged, unstaged) if part)  # 두 변경 내용을 빈 부분 없이 합친다.
 
 
+# ------------------------------------------------------------------------------------------
+# 🔥🔥🔥🔥🔥 핵심 함수
 def collect_git_context(safe_mode: bool = True) -> GitContext:  # 현재 저장소의 변경 맥락을 모은다.
     try:  # Git 저장소 확인 실패를 이해하기 쉬운 오류로 바꾸기 시작한다.
         root_text = _run_git(["rev-parse", "--show-toplevel"]).strip()  # Git 저장소 최상위 경로를 찾는다.
+
     except GitRepositoryError as error:  # Git 저장소가 아닐 때 발생한 오류를 잡는다.
         raise GitRepositoryError("현재 폴더는 Git 저장소가 아닙니다. 프로젝트 루트에서 실행하세요.") from error  # 해결 방법이 담긴 오류로 바꾼다.
+
+
     if Path.cwd().resolve() != Path(root_text).resolve():  # 사용자가 저장소 하위 폴더에서 실행했는지 확인한다.
         raise GitRepositoryError("Git 저장소의 루트 폴더에서 실행하세요.")  # 요구사항에 맞는 실행 위치를 안내한다.
+
     status_raw = _run_git(["status", "--porcelain=v1", "--untracked-files=all", "-z"])  # 특수문자 경로도 안전한 기계 판독용 Git 상태를 수집한다.
+
     if not status_raw.strip():  # 상태 출력이 비어 변경 사항이 없는지 확인한다.
         return GitContext("", (), "", "", 0, 0, (), False)  # API를 부르지 않도록 빈 변경 맥락을 돌려준다.
+
     has_head = _has_head_commit()  # 첫 커밋이 존재하는지 확인한다.
+
     changed_paths, untracked_paths = _collect_changed_paths(has_head)  # 실제 변경 경로를 모은다.
+
     protected = [path for path in changed_paths if is_protected_path(path)]  # 비밀 파일 경로를 먼저 분리한다.
+
     allowed = [path for path in changed_paths if path not in protected]  # 비밀 파일을 전송 후보에서 제거한다.
+
     selected = allowed[:SAFE_MAX_FILES] if safe_mode else allowed  # 안전 모드에서는 최대 10개 파일만 고른다.
+
     limited = allowed[len(selected):]  # 파일 개수 제한으로 빠진 경로를 기록한다.
+
     diff_parts = [_diff_for_path(path, has_head, path in untracked_paths) for path in selected]  # 선택한 각 파일의 diff를 모은다.
+
     combined_diff = "\n".join(part.rstrip() for part in diff_parts if part.strip())  # 빈 diff를 빼고 하나의 텍스트로 합친다.
+
     was_truncated = bool(limited)  # 파일 제한이 적용됐으면 잘림 상태로 시작한다.
+
     if safe_mode:  # 기본 안전 모드에서 내용 마스킹과 줄 제한을 적용한다.
         combined_diff = mask_sensitive_text(combined_diff)  # 알려진 API Key, 토큰, 이메일, 비밀번호를 가린다.
         combined_diff, line_truncated = limit_diff_lines(combined_diff)  # 최대 200줄까지만 남긴다.
         was_truncated = was_truncated or line_truncated  # 파일 또는 줄 중 하나라도 잘렸는지 기록한다.
+
     branch = _run_git(["branch", "--show-current"]).strip() or "(detached HEAD)"  # 현재 브랜치 이름을 읽는다.
+
     status_codes = _parse_status_codes(status_raw)  # 수집한 Git 상태를 파일별 코드로 바꾼다.
+
     status_text = "\n".join(f"{status_codes.get(path, 'M ')} {path}" for path in selected)  # 허용된 파일만 실제 상태 코드와 함께 요약한다.
+
     excluded = tuple([*protected, *limited])  # 보안과 개수 제한으로 제외한 경로를 하나로 묶는다.
+
     return GitContext(branch, tuple(selected), status_text, combined_diff, len(combined_diff.splitlines()), len(changed_paths), excluded, was_truncated)  # 모든 수집 결과를 돌려준다.

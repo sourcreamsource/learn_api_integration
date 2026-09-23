@@ -3,6 +3,7 @@
 import argparse  # commit, pr 명령과 옵션을 해석한다.
 import os  # API 설정을 환경변수에서 읽는다.
 import sys  # 오류 메시지를 표준 오류로 분리한다.
+from pathlib import Path  # 프로젝트 루트의 .env 파일 경로를 안전하게 다룬다.
 from urllib.parse import urlparse  # API URL의 프로토콜과 호스트를 정확하게 검사한다.
 
 from ai_gitgen.ai_client import generate_text  # AI API 호출 함수를 가져온다.
@@ -13,8 +14,33 @@ from ai_gitgen.models import ApiSettings  # API 설정 데이터 구조를 가�
 from ai_gitgen.prompt_builder import SYSTEM_PROMPT, build_commit_prompt, build_pr_prompt  # 명령별 프롬프트 생성 함수를 가져온다.
 
 
-DEFAULT_OPENAI_URL = "https://api.openai.com/v1/chat/completions"  # OpenAI 호환 요청의 기본 전체 URL을 정한다.
-DEFAULT_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"  # Anthropic 요청의 기본 전체 URL을 정한다.
+def load_dotenv(dotenv_path: str | Path | None = None, override: bool = False) -> None:  # 프로젝트 루트의 .env 값을 환경변수로 등록한다.
+    path = Path(dotenv_path) if dotenv_path is not None else Path.cwd() / ".env"  # 별도 경로가 없으면 현재 프로젝트 루트의 .env를 고른다.
+    if not path.is_file():  # .env 파일이 실제로 존재하는지 확인한다.
+        return  # 파일이 없으면 이후 필수 설정 검사에서 정확한 변수 이름을 안내하게 한다.
+    try:  # 파일을 읽지 못하는 운영체제 오류를 설정 오류로 바꾸기 시작한다.
+        lines = path.read_text(encoding="utf-8").splitlines()  # UTF-8 텍스트를 줄 단위로 안전하게 읽는다.
+    except OSError as error:  # 권한이나 입출력 문제로 파일을 읽지 못한 경우를 잡는다.
+        raise ApiConfigurationError(".env 파일을 읽을 수 없습니다. 파일 권한을 확인하세요.") from error  # 비밀값 없이 해결 방법을 알린다.
+    for line_number, raw_line in enumerate(lines, start=1):  # 각 줄과 사람이 확인하기 쉬운 줄 번호를 함께 순회한다.
+        line = raw_line.strip()  # 줄 앞뒤의 공백을 제거한다.
+        if not line or line.startswith("#"):  # 빈 줄 또는 설명 주석인지 확인한다.
+            continue  # 환경변수가 아니므로 다음 줄로 이동한다.
+        if line.startswith("export "):  # 셸의 export 표기도 허용할지 확인한다.
+            line = line.removeprefix("export ").strip()  # export 단어를 제거하고 KEY=VALUE 부분만 남긴다.
+        if "=" not in line:  # 변수 이름과 값을 나누는 등호가 없는지 확인한다.
+            raise ApiConfigurationError(f".env {line_number}번째 줄 형식이 잘못되었습니다. KEY=VALUE 형식을 사용하세요.")  # 값은 숨기고 잘못된 줄 위치만 알린다.
+        key, value = line.split("=", 1)  # 값 안의 등호는 보존하고 첫 번째 등호만 기준으로 나눈다.
+        key = key.strip()  # 환경변수 이름 주변의 공백을 제거한다.
+        value = value.strip()  # 환경변수 값 주변의 공백을 제거한다.
+        if not key.isidentifier():  # Python 환경변수 이름으로 쓰기 어려운 잘못된 이름인지 검사한다.
+            raise ApiConfigurationError(f".env {line_number}번째 줄의 환경변수 이름이 잘못되었습니다.")  # 실제 이름과 값은 출력하지 않는다.
+        has_double_quotes = value.startswith('"') and value.endswith('"')  # 값이 큰따옴표 한 쌍으로 감싸졌는지 확인한다.
+        has_single_quotes = value.startswith("'") and value.endswith("'")  # 값이 작은따옴표 한 쌍으로 감싸졌는지 확인한다.
+        if has_double_quotes or has_single_quotes:  # .env.example처럼 따옴표를 사용한 값인지 확인한다.
+            value = value[1:-1]  # 환경변수에는 바깥쪽 따옴표를 제외한 실제 값만 저장한다.
+        if override or key not in os.environ:  # 명시적 덮어쓰기이거나 기존 환경변수가 없는 경우인지 확인한다.
+            os.environ[key] = value  # 비밀값을 출력하지 않고 현재 Python 프로세스에만 등록한다.
 
 
 def _temperature(value: str) -> float:  # CLI에서 받은 temperature 값을 검사한다.
@@ -56,8 +82,9 @@ def _settings_from_args(args: argparse.Namespace) -> ApiSettings:  # CLI와 환�
     api_key = os.getenv("AI_API_KEY", "").strip()  # 비밀 키는 명령 인자가 아니라 환경변수에서만 읽는다.
     if not api_key:  # 필수 API Key가 비어 있는지 확인한다.
         raise ApiConfigurationError("AI_API_KEY 환경변수가 설정되지 않았습니다. 예: export AI_API_KEY=\"YOUR_KEY\"")  # 설정 방법과 함께 오류를 알린다.
-    default_url = DEFAULT_ANTHROPIC_URL if args.api_format == "anthropic" else DEFAULT_OPENAI_URL  # 요청 형식에 맞는 기본 URL을 고른다.
-    api_url = args.api_url or default_url  # 사용자가 지정한 URL이 있으면 우선 사용한다.
+    api_url = (args.api_url or "").strip()  # .env 또는 명령 옵션으로 받은 전체 요청 주소의 공백을 제거한다.
+    if not api_url:  # 임의의 서비스 주소로 대신 요청하지 않도록 필수 URL을 검사한다.
+        raise ApiConfigurationError("AI_API_URL 환경변수가 설정되지 않았습니다. .env.example을 복사한 .env에 전체 엔드포인트를 입력하세요.")  # 필요한 파일과 변수 이름을 안내한다.
     parsed_url = urlparse(api_url)  # 문자열을 프로토콜, 호스트, 경로 부분으로 나눈다.
     is_https = parsed_url.scheme == "https" and bool(parsed_url.hostname)  # 호스트가 있는 HTTPS 주소인지 확인한다.
     is_local_http = parsed_url.scheme == "http" and parsed_url.hostname in {"localhost", "127.0.0.1", "::1"}  # 정확한 로컬 호스트만 평문 HTTP 예외로 허용한다.
@@ -114,9 +141,10 @@ def run(args: argparse.Namespace) -> int:  # 해석된 옵션으로 Git 수집�
 
 
 def main(argv: list[str] | None = None) -> int:  # 터미널 실행과 테스트에서 함께 쓸 진입점을 만든다.
-    parser = build_parser()  # 명령과 옵션을 해석할 객체를 만든다.
-    args = parser.parse_args(argv)  # 실제 입력 인자를 규칙에 따라 해석한다.
-    try:  # 예상 가능한 오류를 긴 traceback 없이 보여 주기 시작한다.
+    try:  # .env 로드부터 실행 오류까지 긴 traceback 없이 처리하기 시작한다.
+        load_dotenv()  # CLI 기본값을 만들기 전에 프로젝트 루트의 .env를 먼저 읽는다.
+        parser = build_parser()  # .env가 등록된 뒤 명령과 옵션을 해석할 객체를 만든다.
+        args = parser.parse_args(argv)  # 실제 입력 인자를 규칙에 따라 해석한다.
         return run(args)  # 전체 자동화 흐름을 실행하고 종료 번호를 받는다.
     except AppError as error:  # Git, 설정, API, 출력 형식 오류를 한곳에서 잡는다.
         print(f"[ERROR] {error}", file=sys.stderr)  # 오류 메시지를 표준 오류로 출력한다.

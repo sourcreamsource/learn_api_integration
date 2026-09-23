@@ -1,7 +1,4 @@
 
-
-
-
 def add(a, b):
     return a + b
 
@@ -29,7 +26,8 @@ def abs(a):
 
 
 a = 29
-b = 16
+b = 3
 
 
 add(a, b)
+div(a, b)
